@@ -9,6 +9,11 @@ on:
   issue_comment:
     types: [created]
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 env:
   TF_VERSION: '1.6.0'
   AWS_DEFAULT_REGION: us-east-1
