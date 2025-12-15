@@ -13,15 +13,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
-      #step 0: cache
-      - name: Cache LocalStack Docker Image
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: localstack-docker-${{ runner.os }}-latest
-          restore-keys: |
-            localstack-docker-${{ runner.os }}-
       # Step 1: Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v4
@@ -34,67 +25,60 @@ jobs:
           install-awslocal: 'true'
           configuration: DEBUG=1
 
-      # Step 3: Setup Terraform
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.5.0
-
-      # Step 4: Determine Environment
-      - name: Set Environment
-        id: set-env
+      # Step 3: Debug Environment Variables
+      - name: Debug Environment Variables
         run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "env=prod" >> $GITHUB_ENV
-          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-            echo "env=dev" >> $GITHUB_ENV
-          elif [[ "${{ github.ref }}" == "refs/heads/ltiq" ]]; then
-            echo "env=ltiq" >> $GITHUB_ENV
-          else
-            echo "Unknown branch. Exiting."
-            exit 1
-          fi
+          echo "AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID"
+          echo "AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY"
+          echo "AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION"
+          echo "TF_VAR_REGION: $TF_VAR_REGION"
+          echo "TF_VAR_STATE_BUCKET_NAME: $TF_VAR_STATE_BUCKET_NAME"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+          TF_VAR_REGION: ${{ vars.TF_VAR_REGION }}
+          TF_VAR_STATE_BUCKET_NAME: ${{ vars.TF_VAR_STATE_BUCKET_NAME }}
 
-      # Step 5: Terraform Init with Inline Backend Config
+      # Step 4: Terraform Init with Inline Backend Config
       - name: Terraform Init
         run: |
           terraform init \
-            -backend-config="bucket=${{ secrets.TF_VAR_STATE_BUCKET_NAME }}" \
-            -backend-config="key=${{ env.env }}/terraform.tfstate" \
-            -backend-config="region=${{ secrets.TF_VAR_REGION }}" \
-            -backend-config="access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" \
-            -backend-config="secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            -backend-config="bucket=${{ vars.TF_VAR_STATE_BUCKET_NAME }}" \
+            -backend-config="key=${{ github.ref_name }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_DEFAULT_REGION }}" \
+            -backend-config="access_key=${{ vars.AWS_ACCESS_KEY_ID }}" \
+            -backend-config="secret_key=${{ secrets.AWS_SECRET_ACESS_KEY }}" \
             -backend-config="endpoint=http://localhost:4566" \
             -backend-config="skip_credentials_validation=true" \
             -backend-config="skip_metadata_api_check=true" \
             -backend-config="force_path_style=true"
         env:
-          AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION
-          TF_VAR_REGION: $AWS_DEFAULT_REGION
-          TF_VAR_STATE_BUCKET_NAME: $TF_VAR_STATE_BUCKET_NAME
+          AWS_ACCESS_KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+          TF_VAR_REGION: ${{ vars.TF_VAR_REGION }}
+          TF_VAR_STATE_BUCKET_NAME: ${{ vars.TF_VAR_STATE_BUCKET_NAME }}
 
-      # Step 6: Terraform Plan
+      # Step 5: Terraform Plan
       - name: Terraform Plan
         run: terraform plan -out=tfplan
         env:
-          AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION
-          TF_VAR_REGION: $AWS_DEFAULT_REGION
-          TF_VAR_BUCKET_NAME: $TF_VAR_BUCKET_NAME
-          TF_VAR_STATE_BUCKET_NAME: $TF_VAR_STATE_BUCKET_NAME
+          AWS_ACCESS_KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+          TF_VAR_REGION: ${{ vars.TF_VAR_REGION }}
+          TF_VAR_STATE_BUCKET_NAME: ${{ vars.TF_VAR_STATE_BUCKET_NAME }}
 
-      # Step 7: Terraform Apply
+      # Step 6: Terraform Apply
       - name: Terraform Apply
         if: github.event_name == 'push' && contains(github.event.head_commit.message, 'tf-apply')
         run: terraform apply -auto-approve tfplan
         env:
-          AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION
-          TF_VAR_REGION: $AWS_DEFAULT_REGION
-          TF_VAR_BUCKET_NAME: $TF_VAR_BUCKET_NAME
-          TF_VAR_STATE_BUCKET_NAME: $TF_VAR_STATE_BUCKET_NAME
+          AWS_ACCESS_KEY_ID: ${{ vars.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+          TF_VAR_REGION: ${{ vars.TF_VAR_REGION }}
+          TF_VAR_STATE_BUCKET_NAME: ${{ vars.TF_VAR_STATE_BUCKET_NAME }}
+
 
