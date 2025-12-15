@@ -1,0 +1,87 @@
+name: Terraform Workflow with LocalStack
+
+on:
+  push:
+    branches: [ main, dev, ltiq ]  # Trigger on pushes to these branches
+  issue_comment:
+    types: [created]               # Trigger when a comment is created on a PR
+  workflow_dispatch:               # Allow manual runs from the Actions tab
+
+jobs:
+  terraform:
+    name: Terraform Workflow
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Start LocalStack with Pro features enabled
+      - name: Start LocalStack
+        uses: LocalStack/setup-localstack@v0.2.2
+        with:
+          image-tag: 'latest'
+          install-awslocal: 'true'
+          configuration: DEBUG=1
+
+      # Step 3: Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      # Step 4: Determine Action (Plan or Apply)
+      - name: Determine Action
+        id: action
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            if [[ "${{ github.event.head_commit.message }}" == *"tf-apply"* ]]; then
+              echo "action=apply" >> $GITHUB_ENV
+            else
+              echo "action=plan" >> $GITHUB_ENV
+            fi
+          elif [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            if [[ "${{ github.event.comment.body }}" == "tf plan" ]]; then
+              echo "action=plan" >> $GITHUB_ENV
+            else
+              echo "action=none" >> $GITHUB_ENV
+            fi
+          else
+            echo "action=none" >> $GITHUB_ENV
+          fi
+
+      # Step 5: Exit if no action is required
+      - name: Exit if no action is required
+        if: ${{ env.action == 'none' }}
+        run: echo "No action required. Exiting."
+
+      # Step 6: Terraform Init
+      - name: Terraform Init
+        if: ${{ env.action == 'plan' || env.action == 'apply' }}
+        run: terraform init
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.TF_VAR_REGION }}
+          AWS_REGION: ${{ secrets.TF_VAR_REGION }}
+
+      # Step 7: Terraform Plan
+      - name: Terraform Plan
+        if: ${{ env.action == 'plan' }}
+        run: terraform plan -out=tfplan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.TF_VAR_REGION }}
+          AWS_REGION: ${{ secrets.TF_VAR_REGION }}
+
+      # Step 8: Terraform Apply
+      - name: Terraform Apply
+        if: ${{ env.action == 'apply' }}
+        run: terraform apply -auto-approve tfplan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.TF_VAR_REGION }}
+          AWS_REGION: ${{ secrets.TF_VAR_REGION }}
