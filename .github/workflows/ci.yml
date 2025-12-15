@@ -25,6 +25,12 @@ jobs:
           install-awslocal: 'true'
           configuration: DEBUG=1
 
+      # Step 2: Install Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
       # Step 3: Debug Environment Variables
       - name: Debug Environment Variables
         run: |
