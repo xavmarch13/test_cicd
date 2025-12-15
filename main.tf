@@ -14,6 +14,7 @@ provider "aws" {
   }
 }
 
+
 # Variables
 variable "region" {
   description = "AWS region"
