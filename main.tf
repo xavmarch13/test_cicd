@@ -1,22 +1,7 @@
-# Specify the required Terraform version
 terraform {
-  required_version = ">= 1.5.0"
-
-  # Backend configuration for state storage
-  backend "s3" {
-    bucket         = var.state_bucket_name
-    key            = "${terraform.workspace}/terraform.tfstate"
-    region         = var.region
-    access_key     = var.access_key
-    secret_key     = var.secret_key
-    endpoint       = "http://localhost:4566" # LocalStack endpoint
-    skip_credentials_validation = true
-    skip_metadata_api_check     = true
-    force_path_style            = true
-  }
+  backend "s3" {}
 }
 
-# Provider configuration for AWS (LocalStack)
 provider "aws" {
   region                      = var.region
   access_key                  = var.access_key
@@ -47,11 +32,6 @@ variable "secret_key" {
 
 variable "bucket_name" {
   description = "Name of the S3 bucket"
-  type        = string
-}
-
-variable "state_bucket_name" {
-  description = "Name of the S3 bucket for Terraform state"
   type        = string
 }
 
