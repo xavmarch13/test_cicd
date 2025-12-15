@@ -15,5 +15,5 @@ provider "aws" {
 
 # Example resource
 resource "aws_s3_bucket" "example" {
-  bucket = "my-test-bucket-${terraform.workspace}"
+  bucket = "my-test-bucketaform"
 }
