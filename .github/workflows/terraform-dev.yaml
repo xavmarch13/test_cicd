@@ -16,29 +16,9 @@ env:
   AWS_SECRET_ACCESS_KEY: test
 
 jobs:
-  check-comments:
-    if: github.event_name == 'issue_comment' && github.event.issue.pull_request
-    runs-on: ubuntu-latest
-    outputs:
-      command: ${{ steps.check.outputs.command }}
-    steps:
-      - name: Check comment command
-        id: check
-        run: |
-          comment="${{ github.event.comment.body }}"
-          if [[ "$comment" == "tf plan" ]]; then
-            echo "command=plan" >> $GITHUB_OUTPUT
-          elif [[ "$comment" == "tf apply" ]]; then
-            echo "command=apply" >> $GITHUB_OUTPUT
-          else
-            echo "command=none" >> $GITHUB_OUTPUT
-          fi
-
-  terraform-plan:
-    if: |
-      (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && needs.check-comments.outputs.command == 'plan')
-    needs: [check-comments]
+  terraform-plan-auto:
+    # Run automatically when PR is opened/updated
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     environment: dev
     
@@ -46,7 +26,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.event.issue.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -85,7 +65,6 @@ jobs:
           terraform plan -out=tfplan -no-color | tee plan_output.txt
 
       - name: Comment Plan Output
-        if: github.event_name == 'issue_comment' || github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
@@ -95,39 +74,155 @@ jobs:
             
             <details><summary>Show Plan</summary>
             
-            \`\`\`
+            \`\`\`terraform
             ${plan}
             \`\`\`
             
             </details>
             
-            *Triggered by: @${{ github.actor }}*`;
+            *Triggered automatically by PR*
             
-            if (context.eventName === 'issue_comment') {
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: output
-              });
-            } else {
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: output
-              });
-            }
+            **Commands:**
+            - Comment \`tf plan\` to re-run the plan
+            - Comment \`tf apply\` to apply these changes`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
 
       - name: Upload Plan
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan-dev
+          name: tfplan-dev-${{ github.event.pull_request.number }}
+          path: terraform/tfplan
+
+  check-comments:
+    # Only run when someone comments on a PR
+    if: |
+      github.event_name == 'issue_comment' && 
+      github.event.issue.pull_request &&
+      (contains(github.event.comment.body, 'tf plan') || contains(github.event.comment.body, 'tf apply'))
+    runs-on: ubuntu-latest
+    outputs:
+      command: ${{ steps.parse.outputs.command }}
+      pr-number: ${{ steps.pr.outputs.number }}
+      pr-sha: ${{ steps.pr.outputs.sha }}
+    steps:
+      - name: Parse comment
+        id: parse
+        run: |
+          comment="${{ github.event.comment.body }}"
+          if [[ "$comment" == "tf plan" ]]; then
+            echo "command=plan" >> $GITHUB_OUTPUT
+          elif [[ "$comment" == "tf apply" ]]; then
+            echo "command=apply" >> $GITHUB_OUTPUT
+          else
+            echo "command=none" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get PR details
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('number', pr.data.number);
+            core.setOutput('sha', pr.data.head.sha);
+
+  terraform-plan-manual:
+    # Run when someone comments "tf plan"
+    if: |
+      needs.check-comments.outputs.command == 'plan'
+    needs: [check-comments]
+    runs-on: ubuntu-latest
+    environment: dev
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-comments.outputs.pr-sha }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Start LocalStack
+        run: |
+          docker run -d \
+            --name localstack \
+            -p 4566:4566 \
+            -e SERVICES=s3,ec2,lambda,iam,dynamodb \
+            -e DEBUG=1 \
+            localstack/localstack:latest
+          
+          timeout 60 bash -c 'until curl -s http://localhost:4566/_localstack/health | grep -q "\"s3\": \"available\""; do sleep 2; done'
+
+      - name: Configure AWS for LocalStack
+        run: |
+          echo "AWS_ENDPOINT_URL=http://localhost:4566" >> $GITHUB_ENV
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="endpoint=http://localhost:4566" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_metadata_api_check=true" \
+            -backend-config="skip_requesting_account_id=true"
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: terraform
+        run: |
+          terraform plan -out=tfplan -no-color | tee plan_output.txt
+
+      - name: Comment Plan Output
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/plan_output.txt', 'utf8');
+            const output = `#### Terraform Plan 📖 \`dev\`
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`terraform
+            ${plan}
+            \`\`\`
+            
+            </details>
+            
+            *Triggered by: @${{ github.actor }}*
+            
+            **Commands:**
+            - Comment \`tf plan\` to re-run the plan
+            - Comment \`tf apply\` to apply these changes`;
+            
+            github.rest.issues.createComment({
+              issue_number: ${{ needs.check-comments.outputs.pr-number }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev-${{ needs.check-comments.outputs.pr-number }}
           path: terraform/tfplan
 
   terraform-apply:
+    # Run when someone comments "tf apply"
     if: |
-      github.event_name == 'issue_comment' && 
       needs.check-comments.outputs.command == 'apply'
     needs: [check-comments]
     runs-on: ubuntu-latest
@@ -137,7 +232,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.issue.pull_request.head.sha }}
+          ref: ${{ needs.check-comments.outputs.pr-sha }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -182,9 +277,9 @@ jobs:
             const apply = fs.readFileSync('terraform/apply_output.txt', 'utf8');
             const output = `#### Terraform Apply ✅ \`dev\`
             
-            <details><summary>Show Apply</summary>
+            <details><summary>Show Apply Output</summary>
             
-            \`\`\`
+            \`\`\`terraform
             ${apply}
             \`\`\`
             
@@ -193,7 +288,7 @@ jobs:
             *Applied by: @${{ github.actor }}*`;
             
             github.rest.issues.createComment({
-              issue_number: context.issue.number,
+              issue_number: ${{ needs.check-comments.outputs.pr-number }},
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: output
